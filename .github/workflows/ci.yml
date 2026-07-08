@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt ruff
+
+      - name: Lint
+        run: ruff check src tests
+
+      - name: Train model
+        run: python src/train.py
+
+      - name: Run tests
+        run: pytest tests/ -v --tb=short
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: test
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t mlops-anomaly-detection:${{ github.sha }} .
+
+      - name: Smoke test container
+        run: |
+          docker run -d --name smoke -p 8000:8000 mlops-anomaly-detection:${{ github.sha }}
+          sleep 15
+          curl --fail http://localhost:8000/health
+          docker stop smoke
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image to GHCR
+        if: github.event_name == 'push'
+        run: |
+          docker tag mlops-anomaly-detection:${{ github.sha }} ghcr.io/yigit-8/anomaly-detection:latest
+          docker tag mlops-anomaly-detection:${{ github.sha }} ghcr.io/yigit-8/anomaly-detection:${{ github.sha }}
+          docker push ghcr.io/yigit-8/anomaly-detection:latest
+          docker push ghcr.io/yigit-8/anomaly-detection:${{ github.sha }}
