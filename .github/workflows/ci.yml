@@ -63,7 +63,7 @@ jobs:
       - name: Push image to GHCR
         if: github.event_name == 'push'
         run: |
-          docker tag mlops-anomaly-detection:${{ github.sha }} ghcr.io/yigit-8/anomaly-detection:latest
-          docker tag mlops-anomaly-detection:${{ github.sha }} ghcr.io/yigit-8/anomaly-detection:${{ github.sha }}
-          docker push ghcr.io/yigit-8/anomaly-detection:latest
-          docker push ghcr.io/yigit-8/anomaly-detection:${{ github.sha }}
+          docker tag mlops-anomaly-detection:${{ github.sha }} ghcr.io/yigitliman/anomaly-detection:latest
+          docker tag mlops-anomaly-detection:${{ github.sha }} ghcr.io/yigitliman/anomaly-detection:${{ github.sha }}
+          docker push ghcr.io/yigitliman/anomaly-detection:latest
+          docker push ghcr.io/yigitliman/anomaly-detection:${{ github.sha }}

@@ -1,6 +1,6 @@
 # MLOps Anomaly Detection
 
-![CI](https://github.com/yigit-8/anomaly-detection/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/yigitliman/anomaly-detection/actions/workflows/ci.yml/badge.svg)
 
 Detects anomalies in sensor readings using IsolationForest, with MLflow experiment tracking, Evidently drift detection, and GitHub Actions CI/CD.
 
