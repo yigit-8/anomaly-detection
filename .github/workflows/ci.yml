@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
 
+# One run per branch: a new push supersedes the in-flight run for the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -31,7 +36,7 @@ jobs:
         run: python src/train.py
 
       - name: Run tests
-        run: pytest tests/ -v --tb=short
+        run: pytest tests/ -v --tb=short --cov=src --cov-report=term-missing
 
   docker-build:
     runs-on: ubuntu-latest
@@ -48,8 +53,17 @@ jobs:
       - name: Smoke test container
         run: |
           docker run -d --name smoke -p 8000:8000 mlops-anomaly-detection:${{ github.sha }}
-          sleep 15
-          curl --fail http://localhost:8000/health
+          # Poll until the container answers /health rather than guessing at a sleep.
+          deadline=$((SECONDS + 60))
+          until curl --fail --silent http://localhost:8000/health; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "Container did not become healthy within 60s"
+              docker logs smoke
+              docker stop smoke
+              exit 1
+            fi
+            sleep 2
+          done
           docker stop smoke
 
       - name: Log in to GitHub Container Registry

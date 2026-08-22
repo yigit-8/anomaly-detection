@@ -5,6 +5,7 @@ Loads the IsolationForest model saved by train.py and
 classifies incoming sensor readings as normal or anomalous.
 """
 
+import contextlib
 import os
 import sqlite3
 from contextlib import asynccontextmanager
@@ -12,6 +13,7 @@ from contextlib import asynccontextmanager
 import joblib
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
+from loguru import logger
 from pydantic import BaseModel, Field
 
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "model.joblib")
@@ -25,7 +27,7 @@ def load_model():
     if not os.path.exists(MODEL_PATH):
         raise RuntimeError("Model not found. Run src/train.py first.")
     model = joblib.load(MODEL_PATH)
-    print("Model loaded.")
+    logger.info("Model loaded.")
 
 
 def init_db():
@@ -87,10 +89,38 @@ app = FastAPI(
 
 
 class SensorReading(BaseModel):
-    temperature: float = Field(..., description="Temperature in Celsius")
-    vibration: float = Field(..., description="Vibration amplitude")
-    pressure: float = Field(..., description="Pressure in bar")
-    rotation_speed: float = Field(..., description="Rotation speed in RPM")
+    """A single sensor reading.
+
+    The bounds below are sanity limits, not operating ranges. A failed sensor
+    reporting a negative pressure or an absurd temperature is what this service
+    exists to flag, so extreme readings are accepted and scored rather than
+    rejected. Only input that cannot be scored at all is refused: non-numeric
+    values, missing fields, NaN or infinity (``allow_inf_nan=False``) and
+    temperatures below absolute zero.
+    """
+
+    temperature: float = Field(
+        ...,
+        ge=-273.15,
+        le=1e6,
+        allow_inf_nan=False,
+        description="Temperature in Celsius (absolute zero is the only lower limit)",
+    )
+    vibration: float = Field(
+        ...,
+        allow_inf_nan=False,
+        description="Vibration amplitude (unbounded; negative values reach the model)",
+    )
+    pressure: float = Field(
+        ...,
+        allow_inf_nan=False,
+        description="Pressure in bar (unbounded; a vacuum or negative reading reaches the model)",
+    )
+    rotation_speed: float = Field(
+        ...,
+        allow_inf_nan=False,
+        description="Rotation speed in RPM (unbounded; reversed rotation reaches the model)",
+    )
 
 
 class DetectionResponse(BaseModel):
@@ -154,30 +184,28 @@ def detect_batch(
 
 
 @app.get("/anomalies")
-def get_recent_anomalies(limit: int = 20):
-    conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute(
-        """SELECT temperature, vibration, pressure, rotation_speed,
-                  anomaly_score, timestamp
-           FROM detections WHERE is_anomaly = 1
-           ORDER BY timestamp DESC LIMIT ?""",
-        (limit,),
-    ).fetchall()
-    conn.close()
+def get_recent_anomalies(limit: int = Query(default=20, ge=1, le=500)):
+    with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+        rows = conn.execute(
+            """SELECT temperature, vibration, pressure, rotation_speed,
+                      anomaly_score, timestamp
+               FROM detections WHERE is_anomaly = 1
+               ORDER BY timestamp DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
     keys = ["temperature", "vibration", "pressure", "rotation_speed", "anomaly_score", "timestamp"]
     return {"anomalies": [dict(zip(keys, row)) for row in rows]}
 
 
 @app.get("/logs")
-def get_logs(limit: int = 20):
-    conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute(
-        """SELECT temperature, vibration, pressure, rotation_speed,
-                  is_anomaly, anomaly_score, timestamp
-           FROM detections ORDER BY timestamp DESC LIMIT ?""",
-        (limit,),
-    ).fetchall()
-    conn.close()
+def get_logs(limit: int = Query(default=20, ge=1, le=500)):
+    with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+        rows = conn.execute(
+            """SELECT temperature, vibration, pressure, rotation_speed,
+                      is_anomaly, anomaly_score, timestamp
+               FROM detections ORDER BY timestamp DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
     keys = ["temperature", "vibration", "pressure", "rotation_speed",
             "is_anomaly", "anomaly_score", "timestamp"]
     return [dict(zip(keys, row)) for row in rows]
@@ -185,11 +213,12 @@ def get_logs(limit: int = 20):
 
 @app.get("/stats")
 def get_stats():
-    conn = sqlite3.connect(DB_PATH)
-    total = conn.execute("SELECT COUNT(*) FROM detections").fetchone()[0]
-    anomalies = conn.execute("SELECT COUNT(*) FROM detections WHERE is_anomaly = 1").fetchone()[0]
-    avg_score = conn.execute("SELECT AVG(anomaly_score) FROM detections").fetchone()[0]
-    conn.close()
+    with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+        total = conn.execute("SELECT COUNT(*) FROM detections").fetchone()[0]
+        anomalies = conn.execute(
+            "SELECT COUNT(*) FROM detections WHERE is_anomaly = 1"
+        ).fetchone()[0]
+        avg_score = conn.execute("SELECT AVG(anomaly_score) FROM detections").fetchone()[0]
     return {
         "total_readings": total,
         "anomaly_count": anomalies,

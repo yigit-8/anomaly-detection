@@ -50,6 +50,7 @@ def generate_data(n_samples: int, contamination: float, seed: int = 42) -> pd.Da
 
 
 def train(n_samples: int, contamination: float, n_estimators: int) -> None:
+    mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "file:./mlruns"))
     mlflow.set_experiment("anomaly-detection")
 
     with mlflow.start_run():
