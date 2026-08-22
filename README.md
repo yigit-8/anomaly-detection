@@ -2,13 +2,19 @@
 
 ![CI](https://github.com/yigitliman/anomaly-detection/actions/workflows/ci.yml/badge.svg)
 
-Detects anomalies in sensor readings using IsolationForest, with MLflow experiment tracking, Evidently drift detection, and GitHub Actions CI/CD.
+Scores sensor readings with an IsolationForest. There are no anomaly labels, so the model learns the shape of normal machine operation and the caller picks a score cutoff per request instead of a probability threshold. Same MLflow and Evidently setup as the rest of the series.
 
 ## How it works
 
 The model learns what "normal" sensor behavior looks like during training. When a new reading comes in, it scores how far that reading deviates from normal. Readings that deviate too far are flagged as anomalies.
 
 This approach is unsupervised, meaning no labeled anomaly data is needed at training time.
+
+## Results
+
+`src/train.py` logs precision, recall, F1 and the observed anomaly ratio to MLflow on every run, but there is no table here because those numbers describe the data generator rather than the detector. The synthetic anomalies in `generate_data` sit in temperature, pressure and speed bands that barely overlap the normal readings, so almost anything separates them and the scores land near 1.00.
+
+Treat them as a smoke test that the training path runs. Judging the detector needs real sensor data, where failures are gradual.
 
 ## Architecture
 

@@ -3,6 +3,7 @@ venv/
 __pycache__/
 *.pyc
 .pytest_cache/
+.coverage
 mlruns/
 data/*.db
 data/model.joblib

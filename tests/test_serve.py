@@ -1,7 +1,8 @@
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
-from src.serve import app
+from src.serve import SensorReading, app
 
 NORMAL_READING = {
     "temperature": 70.0,
@@ -68,6 +69,59 @@ def test_batch_detect(client):
 def test_batch_detect_empty_returns_400(client):
     response = client.post("/detect/batch", json=[])
     assert response.status_code == 400
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("pressure", -5.0),
+        ("rotation_speed", -1500.0),
+        ("vibration", -0.5),
+        ("temperature", -273.15),
+        ("temperature", 5000.0),
+    ],
+)
+def test_extreme_reading_is_scored_not_rejected(client, field, value):
+    """A broken sensor is what the detector exists to flag, so it must be scored."""
+    response = client.post("/detect", json={**NORMAL_READING, field: value})
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data["anomaly_score"], float)
+    assert isinstance(data["is_anomaly"], bool)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("temperature", -300.0),  # below absolute zero: not physically representable
+        ("pressure", "not-a-number"),
+        ("vibration", None),
+    ],
+)
+def test_invalid_reading_returns_422(client, field, value):
+    response = client.post("/detect", json={**NORMAL_READING, field: value})
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+@pytest.mark.parametrize(
+    "field", ["temperature", "vibration", "pressure", "rotation_speed"]
+)
+def test_non_finite_reading_is_rejected(field, value):
+    """NaN/inf carry no signal and cannot be scored, so they are still rejected.
+
+    Asserted against the model rather than the endpoint: a non-finite body never
+    reaches the handler, and the 422 payload echoes the offending value, which is
+    itself not JSON-encodable.
+    """
+    with pytest.raises(ValidationError):
+        SensorReading(**{**NORMAL_READING, field: value})
+
+
+def test_missing_field_returns_422(client):
+    payload = {k: v for k, v in NORMAL_READING.items() if k != "pressure"}
+    response = client.post("/detect", json=payload)
+    assert response.status_code == 422
 
 
 def test_get_recent_anomalies(client):
